@@ -20,6 +20,26 @@ from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
 
 load_dotenv()
 
+def get_docs(folder_path):
+    """
+    フォルダ内のファイル一覧を階層的に取得
+    Args:
+        folder_path: フォルダのパス
+    """
+    files = os.listdir(folder_path)
+    docs = []
+    for file in files:
+        if file.endswith(".pdf"):
+            loader = PyMuPDFLoader(f"{folder_path}/{file}")
+        elif file.endswith(".docx"):
+            loader = Docx2txtLoader(f"{folder_path}/{file}")
+        else:
+            continue
+        pages = loader.load()
+        docs.extend(pages)
+
+    return docs
+
 def create_rag_chain(db_name):
     """
     会話履歴の記憶機能を持つRAGのChain作成
@@ -27,24 +47,21 @@ def create_rag_chain(db_name):
         db_name: データベース名
     """
     if db_name == ".db_service":
-        folder_name = "data/service"
+        folder_path = "data/service"
     elif db_name == ".db_customer":
-        folder_name = "data/customer"
+        folder_path = "data/customer"
     elif db_name == ".db_company":
-        folder_name = "data/company"
+        folder_path = "data/company"
     else:
-        folder_name = "data"
-    files = os.listdir(folder_name)
-    docs = []
-    for file in files:
-        if file.endswith(".pdf"):
-            loader = PyMuPDFLoader(f"{folder_name}/{file}")
-        elif file.endswith(".docx"):
-            loader = Docx2txtLoader(f"{folder_name}/{file}")
-        else:
-            continue
-        pages = loader.load()
-        docs.extend(pages)
+        folder_path = "data"
+        folders = os.listdir(folder_path)
+        docs = []
+        for folder in folders:
+            docs.extend(get_docs(folder_path))
+    
+    if not folder_path == "data":
+        docs = get_docs(folder_path)
+    
     text_splitter = CharacterTextSplitter(
         chunk_size=500,
         chunk_overlap=30,
