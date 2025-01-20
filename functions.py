@@ -12,22 +12,28 @@ from langchain.prompts import (
 )
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
+import chromadb
 from langchain.memory import ConversationSummaryBufferMemory
 from langchain_openai import ChatOpenAI
 from langchain.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain.chains.combine_documents import create_stuff_documents_chain
 from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
+import logging
+logging.basicConfig(
+    filename='app.log',
+    level=logging.DEBUG
+)
 
 load_dotenv()
 
-def get_docs(folder_path):
+def get_docs(folder_path, docs):
     """
     フォルダ内のファイル一覧を階層的に取得
     Args:
         folder_path: フォルダのパス
+        docs: ドキュメントのリスト
     """
     files = os.listdir(folder_path)
-    docs = []
     for file in files:
         if file.endswith(".pdf"):
             loader = PyMuPDFLoader(f"{folder_path}/{file}")
@@ -37,7 +43,7 @@ def get_docs(folder_path):
             continue
         pages = loader.load()
         docs.extend(pages)
-
+    
     return docs
 
 def create_rag_chain(db_name):
@@ -46,21 +52,23 @@ def create_rag_chain(db_name):
     Args:
         db_name: データベース名
     """
+    docs = []
+    top_folder_path = "data"
     if db_name == ".db_service":
-        folder_path = "data/service"
+        folder_path = f"{top_folder_path}/service"
     elif db_name == ".db_customer":
-        folder_path = "data/customer"
+        folder_path = f"{top_folder_path}/customer"
     elif db_name == ".db_company":
-        folder_path = "data/company"
+        folder_path = f"{top_folder_path}/company"
     else:
-        folder_path = "data"
-        folders = os.listdir(folder_path)
-        docs = []
-        for folder in folders:
-            docs.extend(get_docs(folder_path))
+        folders = os.listdir(top_folder_path)
+        for folder_path in folders:
+            if folder_path.startswith("."):
+                continue
+            docs.extend(get_docs(f"{top_folder_path}/{folder_path}", docs))
     
-    if not folder_path == "data":
-        docs = get_docs(folder_path)
+    if not db_name == ".db_all":
+        docs = get_docs(folder_path, docs)
     
     text_splitter = CharacterTextSplitter(
         chunk_size=500,
@@ -72,9 +80,34 @@ def create_rag_chain(db_name):
     llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.5, streaming=True)
 
     if os.path.isdir(db_name):
-        db = Chroma(persist_directory=db_name, embedding_function=embeddings)
+        # db = Chroma(persist_directory=db_name, embedding_function=embeddings)
+        client_settings = chromadb.config.Settings(
+            chroma_db_impl="duckdb+parquet",
+            persist_directory=db_name, 
+            anonymized_telemetry=False
+        )
+        db = Chroma(
+            collection_name="langchain_store",
+            embedding_function=embeddings,
+            client_settings=client_settings,
+            persist_directory=db_name,
+        )
     else:
-        db = Chroma.from_documents(splitted_pages, embedding=embeddings, persist_directory=db_name)
+        client_settings = chromadb.config.Settings(
+            chroma_db_impl="duckdb+parquet",
+            persist_directory=db_name,
+            anonymized_telemetry=False
+        )
+        db = Chroma(
+            collection_name="langchain_store",
+            embedding_function=embeddings,
+            client_settings=client_settings,
+            persist_directory=db_name,
+        )
+        db.add_documents(documents=splitted_pages, embedding=embeddings)
+        db.persist()
+        # db = Chroma.from_documents(splitted_pages, embedding=embeddings, persist_directory=db_name)
+    # db = Chroma.from_documents(splitted_pages, embedding=embeddings)
     retriever = db.as_retriever(search_kwargs={"k": 5})
 
     question_generator_template = "会話履歴と最新の入力をもとに、会話履歴なしでも理解できる独立した入力テキストを生成してください。"
