@@ -79,35 +79,35 @@ def create_rag_chain(db_name):
     embeddings = OpenAIEmbeddings()
     llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.5, streaming=True)
 
-    if os.path.isdir(db_name):
-        # db = Chroma(persist_directory=db_name, embedding_function=embeddings)
-        client_settings = chromadb.config.Settings(
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=db_name, 
-            anonymized_telemetry=False
-        )
-        db = Chroma(
-            collection_name="langchain_store",
-            embedding_function=embeddings,
-            client_settings=client_settings,
-            persist_directory=db_name,
-        )
-    else:
-        client_settings = chromadb.config.Settings(
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=db_name,
-            anonymized_telemetry=False
-        )
-        db = Chroma(
-            collection_name="langchain_store",
-            embedding_function=embeddings,
-            client_settings=client_settings,
-            persist_directory=db_name,
-        )
-        db.add_documents(documents=splitted_pages, embedding=embeddings)
-        db.persist()
+    # if os.path.isdir(db_name):
+    #     db = Chroma(persist_directory=db_name, embedding_function=embeddings)
+        # client_settings = chromadb.config.Settings(
+        #     chroma_db_impl="duckdb+parquet",
+        #     persist_directory=db_name, 
+        #     anonymized_telemetry=False
+        # )
+        # db = Chroma(
+        #     collection_name="langchain_store",
+        #     embedding_function=embeddings,
+        #     client_settings=client_settings,
+        #     persist_directory=db_name,
+        # )
+    # else:
+        # client_settings = chromadb.config.Settings(
+        #     chroma_db_impl="duckdb+parquet",
+        #     persist_directory=db_name,
+        #     anonymized_telemetry=False
+        # )
+        # db = Chroma(
+        #     collection_name="langchain_store",
+        #     embedding_function=embeddings,
+        #     client_settings=client_settings,
+        #     persist_directory=db_name,
+        # )
+        # db.add_documents(documents=splitted_pages, embedding=embeddings)
+        # db.persist()
         # db = Chroma.from_documents(splitted_pages, embedding=embeddings, persist_directory=db_name)
-    # db = Chroma.from_documents(splitted_pages, embedding=embeddings)
+    db = Chroma.from_documents(splitted_pages, embedding=embeddings)
     retriever = db.as_retriever(search_kwargs={"k": 5})
 
     question_generator_template = "会話履歴と最新の入力をもとに、会話履歴なしでも理解できる独立した入力テキストを生成してください。"
