@@ -1,95 +1,23 @@
-CONTACT_ITEMS = {
-    "service_related": {
-        "label": "サービス関連",
-        "items": {
-            "usage": {
-                "label": "利用方法",
-                "questions": [
-                    {"question": "サービスの登録方法を教えてください。", "answer": """
-                     サービスの登録方法は以下の手順で行えます。\n  
-                     **1. 公式ウェブサイトにアクセス**  
-                     サービス提供元の公式ウェブサイトにアクセスしてください。\n  
-                     **2. 「新規登録」または「アカウント作成」をクリック**  
-                     トップページやログイン画面に表示されている「新規登録」または「アカウント作成」ボタンをクリックします。\n  
-                     **3. 必要情報を入力**  
-                     メールアドレス、パスワード、名前など、必要な情報をフォームに入力してください。\n  
-                     **4. 利用規約とプライバシーポリシーの確認**  
-                     利用規約とプライバシーポリシーを確認し、同意のチェックボックスをオンにします。\n  
-                     **5. 登録を完了**  
-                     「登録」または「送信」ボタンをクリックすると登録が完了します。\n  
-                     **6. 確認メールの受信**  
-                     入力したメールアドレスに確認メールが届きますので、メール内のリンクをクリックして登録を確定してください。\n  
-                     これでサービスの利用を開始する準備が整います。不明点があれば、サポート窓口までお問い合わせください。"""},
-                    {"question": "サービスを開始するための手順を知りたいです。", "answer": "サービスを開始するための"},
-                    {"question": "無料で利用できる範囲について教えてください。", "answer": "無料で利用できる"}
-                ]
-            },
-            "campaign": {
-                "label": "キャンペーン",
-                "questions": [
-                    {"question": "現在実施中のキャンペーンについて教えてください。", "answer": "現在実施中の"},
-                    {"question": "キャンペーンコードの使い方を教えてください。", "answer": "キャンペーンコードの"},
-                    {"question": "次回のキャンペーンはいつ実施されますか？", "answer": "次回のキャンペーンは"}
-                ]
-            },
-            "price": {
-                "label": "料金",
-                "questions": [
-                    {"question": "各プランの料金体系を教えてください。", "answer": "各プランの料金体系を"},
-                    {"question": "無料トライアルはどのように利用できますか？", "answer": "無料トライアルはどのように"},
-                    {"question": "支払い方法の種類について教えてください。", "answer": "支払い方法の"}
-                ]
-            }
+APP_NAME = "問い合わせ対応自動化AIエージェント"
+STYLE = """
+<style>
+    .stHorizontalBlock {
+        margin-top: -14px;
+    }
+    .stChatMessage + .stHorizontalBlock {
+        margin-left: 56px;
+    }
+    .stChatMessage + .stHorizontalBlock .stColumn:nth-of-type(2) {
+        margin-left: -24px;
+    }
+    @media screen and (max-width: 480px) {
+        .stChatMessage + .stHorizontalBlock {
+            flex-wrap: nowrap;
+            margin-left: 56px;
         }
-    },
-    "troubleshooting": {
-        "label": "トラブルシューティング",
-        "items": {
-            "installation": {
-                "label": "設定やインストール",
-                "questions": [
-                    {"question": "サービスをインストールする手順を教えてください。", "answer": "サービスをインストールする"},
-                    {"question": "インストール時にエラーが発生しました。どうすればいいですか？", "answer": "インストール時に"},
-                    {"question": "初期設定が完了しません。原因と対処法を教えてください。", "answer": "初期設定が"}
-                ]
-            },
-            "service_unavailable": {
-                "label": "サービスの不具合",
-                "questions": [
-                    {"question": "サービスが起動しません。どうすればいいですか？", "answer": "サービスが起動"},
-                    {"question": "利用中にエラーコードが表示されました。対処方法を教えてください。", "answer": "利用中にエラーコードが"},
-                    {"question": "サービスが突然停止しました。どう対応すればよいですか？", "answer": "サービスが突然停止"}
-                ]
-            }
-        }
-    },
-    "account_related": {
-        "label": "アカウント関連",
-        "items": {
-            "account_creation": {
-                "label": "新規作成・ログイン",
-                "questions": [
-                    {"question": "アカウントを新規作成する方法を教えてください。", "answer": "アカウントを新規作成する"},
-                    {"question": "ログインに必要な情報を忘れてしまいました。どうすればいいですか？", "answer": "ログインに必要な情報を"},
-                    {"question": "ログイン時にエラーが発生する場合の対処法は？", "answer": "ログイン時にエラーが"}
-                ]
-            },
-            "account_modification": {
-                "label": "登録情報の変更方法",
-                "questions": [
-                    {"question": "登録しているメールアドレスを変更する方法を教えてください。", "answer": "登録しているメールアドレスを"},
-                    {"question": "パスワードをリセットするにはどうすればいいですか？", "answer": "パスワードをリセットするには"},
-                    {"question": "プロフィール写真を変更する手順を教えてください。", "answer": "プロフィール写真を変更する"}
-                ]
-            },
-            "account_withdrawal": {
-                "label": "退会方法",
-                "questions": [
-                    {"question": "アカウントを退会する手順を教えてください。", "answer": "アカウントを退会する"},
-                    {"question": "退会後にデータはどうなりますか？", "answer": "退会後にデータは"},
-                    {"question": "一時的にアカウントを停止する方法はありますか？", "answer": "一時的にアカウントを"}
-                ]
-            }
+        .stChatMessage + .stHorizontalBlock .stColumn:nth-of-type(2) {
+            margin-left: -206px;
         }
     }
-}
+</style>
+"""

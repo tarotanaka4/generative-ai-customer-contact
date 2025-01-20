@@ -1,36 +1,40 @@
 import streamlit as st
-from langchain.memory import ConversationSummaryBufferMemory
-from langchain.chains import ConversationChain
-from langchain.prompts import (
-    ChatPromptTemplate,
-    HumanMessagePromptTemplate,
-    MessagesPlaceholder,
-)
-from langchain_openai import ChatOpenAI
+from dotenv import load_dotenv
 from langchain.agents import AgentType, initialize_agent, load_tools
 from langchain.tools import Tool
-from langchain.schema import SystemMessage
-from dotenv import load_dotenv
+from langchain import SerpAPIWrapper
+from langchain.schema import SystemMessage, HumanMessage, AIMessage
+import tiktoken
+from langchain_openai import ChatOpenAI
+from langchain_community.callbacks.streamlit import StreamlitCallbackHandler
 import constants as ct
+import functions as ft
 
+# 各種設定
+st.set_page_config(
+    page_title=ct.APP_NAME
+)
 load_dotenv()
 
-st.markdown("## 問い合わせ対応自動化AIエージェント")
-url = "https://fresh-cheque-38d.notion.site/AI-FAQ-89b471c62e5c4effb0f5500a9df92750"
-st.markdown("※FAQページは[こちら](%s)" % url)
+# CSSでの細かいスタイリング
+st.markdown(ct.STYLE, unsafe_allow_html=True)
 
-st.markdown(
-    """<style>.stHorizontalBlock {
-        flex-wrap: nowrap;
-        margin-left: 56px;
-        margin-top: -20px;
-    }
-    .stHorizontalBlock .stColumn:nth-of-type(2) {
-        margin-left: -214px;
-    }</style>""",
-    unsafe_allow_html=True
-)
+# 初期表示
+st.markdown(f"## {ct.APP_NAME}")
+st.markdown("**※AIエージェントの利用有無**")
 
+col1, col2 = st.columns([1, 3])
+with col1:
+    st.session_state.mode = st.selectbox(label="モード", options=["利用する", "利用しない"], label_visibility="collapsed")
+
+with st.chat_message("assistant", avatar="images/ai_icon.jpg"):
+    st.success("こちらは弊社に関する質問にお答えするチャットボットです。上記の回答モードでAIエージェントの利用有無を選択し、画面下部のチャット欄から自由に質問してください。生成AIロボットが自動でお答えいたします。")
+    st.markdown("**【AIエージェントとは】**")
+    st.markdown("質問に対して適切と考えられる回答を生成できるまで、生成AIロボット自身に試行錯誤してもらえる機能です。自身の回答に対して評価・改善を繰り返すことで、より優れた回答を生成できます。")
+    st.warning("AIエージェントを利用する場合、回答生成により多くの時間がかかる可能性があります。まずはAIエージェントなしで回答を生成し、適切な回答が得られなかった場合にAIエージェントありで回答を生成してみてください。")
+    st.caption("※AIエージェントを利用したからといって、必ずしも適切な回答を得られるとは限りません。")
+
+# 初期処理
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -40,66 +44,68 @@ if "messages" not in st.session_state:
     st.session_state.dissatisfied_reason = ""
     st.session_state.feedback_no_reason_send_flg = False
 
-    st.session_state.big_category_selected_flg = False
-    st.session_state.small_category_selected_flg = False
+    st.session_state.MAX_ALLOWED_TOKENS = 1000
+    st.session_state.total_tokens = 0
+    st.session_state.chat_history = []
 
-    # 質問項目一覧と対応するフラグ立て
-    st.session_state.contact_items = {}
-    for big_category in ct.CONTACT_ITEMS:
-        st.session_state.contact_items[big_category] = {
-            "selected": False,  # 大カテゴリ単位でのフラグ
-            "items": {}
-        }
-        for small_category in ct.CONTACT_ITEMS[big_category]["items"]:
-            st.session_state.contact_items[big_category]["items"][small_category] = {
-                "selected": False,  # 小カテゴリ単位でのフラグ
-                "questions": {}
-            }
-            for index, _ in enumerate(ct.CONTACT_ITEMS[big_category]["items"][small_category]["questions"]):
-                st.session_state.contact_items[big_category]["items"][small_category]["questions"][str(index)] = False # 質問単位でのフラグ
+    # 消費トークン数カウント用のオブジェクト準備
+    st.session_state.enc = tiktoken.get_encoding("cl100k_base")
+    # コールバックのハンドラ準備
+    st.session_state.st_callback = StreamlitCallbackHandler(st.container())
+    
+    # テーマごとのChainを作成
+    service_doc_chain = ft.create_rag_chain(".db_service")
+    customer_doc_chain = ft.create_rag_chain(".db_customer")
+    company_doc_chain = ft.create_rag_chain(".db_company")
+    st.session_state.rag_chain = ft.create_rag_chain(".db_all")
 
-    # LLMとのやり取り
-    system_template = """
-    you are a helpful assistant.
-    """
-    prompt = ChatPromptTemplate.from_messages([
-        SystemMessage(content=system_template),
-        MessagesPlaceholder(variable_name="history"),
-        HumanMessagePromptTemplate.from_template("{input}")
-    ])
-    llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.5)
-    memory = ConversationSummaryBufferMemory(
+    # Toolで実行される関数の定義
+    def run_service_doc_chain(param):
+        ai_msg = service_doc_chain.invoke({"input": param, "chat_history": st.session_state.chat_history})
+        st.session_state.chat_history.extend([HumanMessage(content=param), AIMessage(content=ai_msg["answer"])])
+        return ai_msg["answer"]
+    def run_customer_doc_chain(param):
+        ai_msg = customer_doc_chain.invoke({"input": param, "chat_history": st.session_state.chat_history})
+        st.session_state.chat_history.extend([HumanMessage(content=param), AIMessage(content=ai_msg["answer"])])
+        return ai_msg["answer"]
+    def run_company_doc_chain(param):
+        ai_msg = company_doc_chain.invoke({"input": param, "chat_history": st.session_state.chat_history})
+        st.session_state.chat_history.extend([HumanMessage(content=param), AIMessage(content=ai_msg["answer"])])
+        return ai_msg["answer"]
+
+    # AgentExecutorの作成
+    search = SerpAPIWrapper()
+    tools = [
+        Tool(
+            name = "Web検索Tool",
+            func=search.run,
+            description="自社サービス「HealthX」に関する質問で、Web検索が必要と判断した場合に使う"
+        ),
+        Tool(
+            func=run_service_doc_chain,
+            name="自社サービス「EcoTee」について",
+            description="自社サービス「EcoTee」に関する情報を参照したい時に使う"
+        ),
+        Tool(
+            func=run_customer_doc_chain,
+            name="顧客とのやり取りについて",
+            description="顧客とのやりとりに関する情報を参照したい時に使う"
+        ),
+        Tool(
+            func=run_company_doc_chain,
+            name="自社「株式会社EcoTee」について",
+            description="自社「株式会社EcoTee」に関する情報を参照したい時に使う"
+        )
+    ]
+    llm = ChatOpenAI(model_name="gpt-4o-mini", temperature=0.5, streaming=True)
+    st.session_state.agent_executor = initialize_agent(
         llm=llm,
-        max_token_limit=500,
-        return_messages=True
+        tools=tools,
+        agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+        max_iterations=5,
+        early_stopping_method="generate",
+        handle_parsing_errors=True,
     )
-    st.session_state.chain = ConversationChain(
-        llm=llm,
-        prompt=prompt,
-        memory=memory
-    )
-    # general_tool = Tool.from_function(
-    #     func=st.session_state.chain.run,
-    #     name="一般的な質問への回答",
-    #     description="一般的な質問に回答する"
-    # )
-    # tools = load_tools(["ddg-search"])
-    # tools.append(general_tool)
-    # st.session_state.agent_executor = initialize_agent(
-    #     llm=llm,
-    #     tools=tools,
-    #     agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION
-    # )
-
-with st.chat_message("assistant", avatar="images/robot.jpg"):
-    st.success("私はお客様のご質問にお答えする生成AIロボットです。画面下部のチャット欄から対話形式でやり取りするか、以下のボタンをクリックしてよくある質問への回答をご参照ください。")
-    for big_category in ct.CONTACT_ITEMS:
-        if st.session_state.contact_items[big_category]["selected"]:
-            st.session_state.contact_items[big_category]["selected"] = st.button(ct.CONTACT_ITEMS[big_category]["label"])
-            st.session_state.contact_items[big_category]["selected"] = True
-        else:
-            st.session_state.contact_items[big_category]["selected"] = st.button(ct.CONTACT_ITEMS[big_category]["label"])
-    # st.session_state.contact_flg = st.button("直接の問い合わせ")
 
 input_message = st.chat_input("質問を入力してください。")
 
@@ -108,150 +114,77 @@ if st.session_state.feedback_no_flg and input_message:
 
 for index, message in enumerate(st.session_state.messages):
     if message["role"] == "assistant":
-        with st.chat_message(message["role"], avatar="images/robot.jpg"):
+        with st.chat_message(message["role"], avatar="images/ai_icon.jpg"):
             st.markdown(message["content"])
+            # ユーザーフィードバック後のAI側の表示
             if index == len(st.session_state.messages) - 1:
                 if st.session_state.feedback_yes_flg:
                     st.caption("ご満足いただけて良かったです！他にもご質問があれば、お気軽にお尋ねください！")
                     st.session_state.feedback_yes_flg = False
-                    # 「はい」が押された場合の処理
-                    # 1. 問い合わせログ一覧にお役立ち情報として登録するため、ChromaのDBに情報を保存する
-                    # 2. 管理者向けのダッシュボード画面で、問い合わせ情報の一覧を表示する際、お役立ち情報として表示する
                 if st.session_state.feedback_no_flg:
                     st.caption("ご期待に添えず申し訳ございません。今後の改善のために、差し支えない範囲でご満足いただけなかった理由を教えていただけますと幸いです。")
                     st.session_state.dissatisfied_reason = st.text_area("", label_visibility="collapsed")
                     if st.button("送信"):
                         st.session_state.feedback_no_flg = False
                         st.session_state.feedback_no_reason_send_flg = True
-                        # 「いいえ」が押された場合の処理
-                        # 1. 問い合わせログ一覧に不満足情報として登録するため、ChromaのDBに情報を保存する
-                        # 2. 管理者向けのダッシュボード画面で、問い合わせ情報の一覧を表示する際、不満足情報として表示する
                         st.rerun()
                 if st.session_state.feedback_no_reason_send_flg:
                     st.session_state.feedback_no_reason_send_flg = False
                     st.caption("ご回答いただき誠にありがとうございます。")
     else:
-        with st.chat_message(message["role"], avatar="images/user.jpeg"):
+        with st.chat_message(message["role"], avatar="images/user_icon.jpeg"):
             st.markdown(message["content"])
+            # ユーザーフィードバック後のユーザー側の表示
             if index == len(st.session_state.messages) - 1:
                 if st.session_state.feedback_yes_flg:
                     st.caption("ご満足いただけて良かったです！他にもご質問があれば、お気軽にお尋ねください！")
                     st.session_state.feedback_yes_flg = False
-                    # 「はい」が押された場合の処理
-                    # 1. 問い合わせログ一覧にお役立ち情報として登録するため、ChromaのDBに情報を保存する
-                    # 2. 管理者向けのダッシュボード画面で、問い合わせ情報の一覧を表示する際、お役立ち情報として表示する
                 if st.session_state.feedback_no_flg:
                     st.caption("ご期待に添えず申し訳ございません。今後の改善のために、差し支えない範囲でご満足いただけなかった理由を教えていただけますと幸いです。")
                     st.session_state.dissatisfied_reason = st.text_area("", label_visibility="collapsed")
                     if st.button("送信"):
                         st.session_state.feedback_no_flg = False
                         st.session_state.feedback_no_reason_send_flg = True
-                        # 「いいえ」が押された場合の処理
-                        # 1. 問い合わせログ一覧に不満足情報として登録するため、ChromaのDBに情報を保存する
-                        # 2. 管理者向けのダッシュボード画面で、問い合わせ情報の一覧を表示する際、不満足情報として表示する
                         st.rerun()
                 if st.session_state.feedback_no_reason_send_flg:
                     st.session_state.feedback_no_reason_send_flg = False
                     st.caption("ご回答いただき誠にありがとうございます。")
 
-for big_category in st.session_state.contact_items:
-    if st.session_state.contact_items[big_category]["selected"]:
-        with st.chat_message("assistant", avatar="images/robot.jpg"):
-            st.markdown(f"「{ct.CONTACT_ITEMS[big_category]['label']}」の質問項目を選択してください。")
-            for small_category in ct.CONTACT_ITEMS[big_category]["items"]:
-                if st.session_state.contact_items[big_category]["items"][small_category]["selected"]:
-                    st.session_state.contact_items[big_category]["items"][small_category]["selected"] = st.button(ct.CONTACT_ITEMS[big_category]["items"][small_category]["label"])
-                    st.session_state.contact_items[big_category]["items"][small_category]["selected"] = True
-                else:
-                    st.session_state.contact_items[big_category]["items"][small_category]["selected"] = st.button(ct.CONTACT_ITEMS[big_category]["items"][small_category]["label"])
-        click_flg = False
-        for small_category in ct.CONTACT_ITEMS[big_category]["items"]:
-            if st.session_state.contact_items[big_category]["items"][small_category]["selected"]:
-                click_flg = True
-                small_category_name = ct.CONTACT_ITEMS[big_category]["items"][small_category]["label"]
-        if click_flg:
-            with st.chat_message("assistant", avatar="images/robot.jpg"):
-                st.markdown(f"「{small_category_name}」の質問項目を選択してください。")
-                for small_category in ct.CONTACT_ITEMS[big_category]["items"]:
-                    if st.session_state.contact_items[big_category]["items"][small_category]["selected"]:
-                        for question_id, _ in enumerate(ct.CONTACT_ITEMS[big_category]["items"][small_category]["questions"]):
-                            if st.session_state.contact_items[big_category]["items"][small_category]["questions"][str(question_id)]:
-                                st.session_state.contact_items[big_category]["items"][small_category]["questions"][str(question_id)] = st.button(ct.CONTACT_ITEMS[big_category]["items"][small_category]["questions"][question_id]["question"])
-                                st.session_state.contact_items[big_category]["items"][small_category]["questions"][str(question_id)] = True
-                            else:
-                                st.session_state.contact_items[big_category]["items"][small_category]["questions"][str(question_id)] = st.button(ct.CONTACT_ITEMS[big_category]["items"][small_category]["questions"][question_id]["question"])
-            click_flg = False
-            for small_category in ct.CONTACT_ITEMS[big_category]["items"]:
-                for question_id, _ in enumerate(ct.CONTACT_ITEMS[big_category]["items"][small_category]["questions"]):
-                    if st.session_state.contact_items[big_category]["items"][small_category]["questions"][str(question_id)]:
-                        click_flg = True
-                        answer = ct.CONTACT_ITEMS[big_category]["items"][small_category]["questions"][question_id]["answer"]
-            if click_flg:
-                with st.chat_message("assistant", avatar="images/robot.jpg"):
-                    st.markdown(answer)
-
 if input_message:
-    st.session_state.messages.append({"role": "user", "content": input_message})
-    with st.chat_message("user", avatar="images/user.jpeg"):
-        st.markdown(input_message)
+    # 会話履歴の上限を超えた場合、受け付けない
+    input_tokens = len(st.session_state.enc.encode(input_message))
+    if input_tokens > st.session_state.MAX_ALLOWED_TOKENS:
+        with st.chat_message("assistant", avatar="images/ai_icon.jpg"):
+            st.error(f"入力されたテキストの文字数が受付上限値（{st.session_state.MAX_ALLOWED_TOKENS}）を超えています。受付上限値を超えないよう、再度入力してください。")
+    else:
+        st.session_state.total_tokens += input_tokens
 
-    with st.spinner('回答生成中...'):
-        result = st.session_state.chain.predict(input=input_message)
-        # result = st.session_state.agent_executor.run(input_message)
-        if input_message == "製品番号SHL-0459-0MC5Tのセキュリティ要件を教えて":
-            result = """
-                製品番号SHL-0459-0MC5Tのセキュリティ要件は次のように定義されています。\nこの製品は、高度なセキュリティ機能を備えており、特に以下の点で企業や個人のデータ保護を確保することを目的としています。\n\n**1. データ暗号化:**  \n本製品は、業界標準であるAES-256暗号化を採用しており、通信中および保存時のデータを暗号化します。この技術により、データの盗聴や改ざんを防ぎます。また、暗号化キーは動的に管理され、一定期間ごとに更新される仕組みが備わっています。\n\n**2. 認証プロセス:**  \n本製品は、二要素認証（2FA）をサポートしており、従来のパスワード認証に加えて、セキュリティトークンや生体認証（指紋または顔認識）を利用可能です。この仕組みにより、不正なログインを防ぐことができます。\n\n**3. アクセス制御:**  \nユーザーの役割に応じたロールベースアクセス制御（RBAC）を適用しています。これにより、管理者、一般ユーザー、ゲストなどの異なる権限レベルを設定し、不要なデータアクセスを防止します。さらに、本製品はISO 27001に準拠しており、第三者機関によるセキュリティ監査を定期的に受けています。詳細な技術仕様については、セキュリティ要件ドキュメント（ドキュメントID: SEC0459）をご参照ください。
-            """
-        elif input_message == "この製品は海外でも利用可能ですか？また海外への発送は可能ですか？":
-            result = """
-                この製品は海外でも問題なく利用可能です。ただし、製品の動作環境や電圧に依存する場合がありますので、利用される国の電圧やプラグ規格が製品に対応していることを事前にご確認ください。\n\nまた、海外への発送は現在50カ国以上に対応しており、主に北米、ヨーロッパ、アジア地域への配送を行っています。配送方法には標準配送とエクスプレス配送があり、選択可能です。具体的な発送手続きについては、当社ウェブサイトの『海外配送ガイド』をご参照いただくか、カスタマーサポートにお問い合わせください。
-            """
-        elif input_message == "支払い方法にはどんな選択肢がありますか？":
-            result = """
-                当社では、さまざまな支払い方法をご用意しております。以下が現在ご利用可能な支払い方法の一覧です。
+        # ユーザーメッセージの追加と表示
+        st.session_state.messages.append({"role": "user", "content": input_message})
+        with st.chat_message("user", avatar="images/user_icon.jpeg"):
+            st.markdown(input_message)
+        
+        res_box = st.empty()
+        with st.spinner("回答生成中..."):
+            # AIエージェントの実行
+            result = ft.execute_agent_or_chain(input_message, st.session_state.mode, st.session_state.chat_history)
+            st.session_state.messages.append({"role": "assistant", "content": result})
+        
+        # 古い会話履歴を削除
+        response_tokens = len(st.session_state.enc.encode(result))
+        st.session_state.total_tokens += response_tokens
+        while st.session_state.total_tokens > st.session_state.MAX_ALLOWED_TOKENS:
+            removed_message = st.session_state.chat_history.pop(1)
+            removed_tokens = len(st.session_state.enc.encode(removed_message.content))
+            st.session_state.total_tokens -= removed_tokens
 
-                **1. クレジットカード:**  
-                VISA、MasterCard、American Express、JCBなど主要なクレジットカードに対応しています。カード情報 を安全に保護するため、業界標準の暗号化技術を使用しています。
+        # AIメッセージの表示
+        with st.chat_message("assistant", avatar="images/ai_icon.jpg"):
+            st.markdown(result)
+            st.session_state.answer_flg = True
+            st.caption("この回答はお役に立ちましたか？フィードバックをいただくことで、生成AIの回答の質が向上します。")
 
-                **2. デビットカード:**  
-                銀行口座と直接連動するデビットカードもご利用いただけます。クレジットカードと同じ手続きで簡単に支払い可能です。
-
-                **3. 銀行振込:**  
-                請求書発行後、指定の銀行口座にお振り込みいただく方法です。振込手数料はお客様のご負担となります。
-
-                **4. 電子マネー・デジタルウォレット:** 
-                PayPay、LINE Pay、楽天ペイ、Apple Pay、Google Payなどに対応しております。スマートフォンを使用した簡単な決済が可能です。
-
-                **5. 後払いサービス:**  
-                決済代行会社を通じた後払いも選択可能です。利用可能額や審査条件は各サービス提供会社によります。
-
-                これらの方法は、オンラインストアおよび一部の実店舗で利用可能です。さらに詳細な手続きについては、当社の支払いガイドをご確認いただくか、カスタマーサポートまでお問い合わせください。
-            """
-        elif input_message == "FAQやマニュアルはどこで確認できますか？":
-            result = """
-                当社のFAQやマニュアルは、複数の方法でご確認いただけます。
-
-                **1. ウェブサイト:**  
-                公式ウェブサイトの『サポート』ページにアクセスすると、FAQやダウンロード可能なマニュアルが一覧で表示されます。検索バーを使えば、特定のキーワードやトピックで絞り込むことができます。
-                
-                **2. 製品パッケージ内のQRコード:**  
-                お手元の製品パッケージに印刷されているQRコードをスキャンすると、該当製品のマニュアルやFAQページに直接アクセスできます。
-                
-                **3. サポートアプリ:**  
-                当社のサポートアプリをスマートフォンにインストールすると、FAQや製品マニュアルを簡単に閲覧できるほか、最新のアップデート情報もご確認いただけます。
-                
-                **4. メールでのお問い合わせ:**  
-                必要に応じて、カスタマーサポート（support@example.com）にご連絡いただければ、関連するリンクや資料を直接お送りすることも可能です。
-
-                お客様が必要とする情報が確実に見つかるよう、さまざまなアクセス手段をご用意しております。
-            """
-        st.session_state.messages.append({"role": "assistant", "content": result})
-
-    with st.chat_message("assistant", avatar="images/robot.jpg"):
-        st.markdown(result)
-        st.session_state.answer_flg = True
-        st.caption("この回答はお役に立ちましたか？フィードバックをいただくことで、生成AIの回答の質が向上します。")
-
+# ユーザーフィードバックのボタン表示
 if st.session_state.answer_flg:
     col1, col2, col3 = st.columns([1, 1, 5])
     with col1:
